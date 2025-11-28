@@ -9,6 +9,7 @@ using namespace std;
 
 int main() {
 	render();
+	find_target();
 	//cartesian(15, 0);
 	return 0;
 }

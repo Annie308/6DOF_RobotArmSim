@@ -39,7 +39,6 @@
 *.lai
 *.la
 *.a
-*.lib
 
 #executables
 
@@ -47,26 +46,26 @@
 *.out
 *.app
 
-#temporary
+#debug files
+x64/
 
-*.log
-*.tlog
-*.db
-*.json
-*.bin
-*.ipch
-
-#VS files
-
-*.vsidx
-*.suo
-*.vcxproj
-*.vcxproj.filters
-*.vcxproj.user
-*/.vs/
-*.sln
-*/x64/
+#build
+out/
+build/
 
 #libraries 
+*/lib/
 
-*/include/
+.vs/
+*.sln
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.pdb
+*.db
+*.opendb
+*.ipch
+*.suo
+*.user
+*.cach
