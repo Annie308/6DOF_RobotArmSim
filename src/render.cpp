@@ -11,16 +11,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <opencv2/opencv.hpp> 
-
 #include "render.h"
 #include "calculations.h"
 #include "arm_attributes.h"
 #include "get_path.h"
 
-//for math constants
-#define _USE_MATH_DEFINES
-
+using Eigen::MatrixXd, Eigen::Vector3d;
 using namespace std;
 
 //=========== Camera and Model Movement ============
@@ -37,7 +33,7 @@ enum class cameraMovements : char {
 	MODEL_ROTATE_BACKWARD
 };
 
-glm::vec3 move_camera(cameraMovements input) {
+static glm::vec3 move_camera(cameraMovements input) {
 	float speed = 0.5;
 
 	switch (input) {
@@ -88,7 +84,7 @@ static void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 	glViewport(0, 0, width, height);
 }
 
-GLuint CreateShaderProgram() {
+static GLuint CreateShaderProgram() {
 
 	int success;
 	char infoLog[512];
@@ -220,7 +216,286 @@ pair<float,glm::vec3> getCamRotation(GLFWwindow*& window) {
 	return { modelAngleoffsets, modelRotAxis };
 }
 
+//given joint angles, define arm vertices for rendering
+
+struct ArmVertices {
+	Eigen::Vector3d claw_base{ 0.0, 0.0, 1.f };
+	Eigen::Vector3d claw_left{ 1.0, 0.0, 0.0f };
+	Eigen::Vector3d claw_right{ 1.0, 0.0, 0.0f };
+
+	vector<float> vertices; 
+	float x; float y; float z; 
+	float pitch; float roll; float yaw;
+	vector<Eigen::Vector3d> arm_pos; // store joint positions
+	Eigen::Vector3d wrist_base; 
+
+	ArmVertices(float _x, float _y, float _z, float _roll, float _pitch, float _yaw) : x(_x), y(_y), z(_z), roll(_roll), pitch(_pitch), yaw(_yaw)
+	{}
+
+	void animateAngles() {
+		float step = 0.05f;
+		float init_t1 = 0, init_t2 = 0, init_t3 = 0, init_t4 = 0, init_t5 = 0, init_t6 = 0;
+
+		// compute arm joint angles and positions
+		Eigen::Vector3d arm_angles = ik(x, y, z);
+		float t1 = arm_angles(0); float t2 = arm_angles(1); float t3 = arm_angles(2);
+
+		Eigen::Vector3d wrist_angles = wristIK(x, y, z, roll, pitch, yaw);
+		float t4 = wrist_angles(0); float t5 = wrist_angles(1); float t6 = wrist_angles(2);
+
+		enum class angleIndices : char {
+			T1, T2, T3, T4, T5, T6
+		};
+
+		vector<angleIndices> armAngles = {
+			angleIndices::T1,
+			angleIndices::T2,
+			angleIndices::T3,
+		};
+
+		vector<angleIndices> wristAngles = {
+			angleIndices::T4,
+			angleIndices::T5,
+			angleIndices::T6,
+		};
+
+		float t_1 = 0, t_2 = 0, t_3 = 0, t_4 = 0, t_5 = 0, t_6 = 0;
+
+		for (float dx = 0.0f; dx <= 1.0f; dx += step) {
+			for (angleIndices t : armAngles) {
+				switch (t) {
+				case angleIndices::T1:
+					t_1 = t_1 + dx * (t1 - t_1);
+					break;
+
+				case angleIndices::T2:
+					t_2 = t_2 + dx * (t2 - t_2);
+					break;
+				case angleIndices::T3:
+					t_3 = t_3 + dx * (t3 - t_3);
+					break;
+				}
+				vector<float> arm_temp = defineArm(t_1, t_2, t_3, t_4, t_5, t_6);
+				vector<float> claw_temp = defineClaw(t_1, t_2, t_3, t_4, t_5, t_6);
+
+				vertices.insert(vertices.end(), arm_temp.begin(), arm_temp.end());
+				vertices.insert(vertices.end(), claw_temp.begin(), claw_temp.end());
+			}
+		}
+		for (float dx = 0.0f; dx <= 1.0f; dx += step) {
+			for (angleIndices t : wristAngles) {
+				switch (t) {
+				case angleIndices::T4:
+					t_4 = t_4 + dx * (t4 - t_4);
+					break;
+				case angleIndices::T5:
+					t_5 = t_5 + dx * (t5 - t_5);
+					break;
+				case angleIndices::T6:
+					t_6 = t_6 + dx * (t6 - t_6);
+					break;
+				}
+				vector<float> arm_temp = defineArm(t_1, t_2, t_3, t_4, t_5, t_6);
+				vector<float> claw_temp = defineClaw(t_1, t_2, t_3, t_4, t_5, t_6);
+
+				vertices.insert(vertices.end(), arm_temp.begin(), arm_temp.end());
+				vertices.insert(vertices.end(), claw_temp.begin(), claw_temp.end());
+			}
+		}
+
+				/*
+				cout << "Animating to angles: " << t_1 << ", " << t_2 << ", " << t_3 << ", " << t_4 << ", " << t_5 << ", " << t_6 << endl;
+
+				cout << "\narm_temp size: " << arm_temp.size();
+				cout << "\nclaw_temp size: " << claw_temp.size();
+				*/
+	}
+
+	vector<float> getVerts() const { return vertices; }
+
+	vector<float> defineArm(float t1, float t2, float t3, float t4, float t5, float t6) {
+		vector<float> arm_verts;
+
+		arm_pos = fk(t1, t2, t3, t4, t5, t6);
+
+		Eigen::Vector3d link1 = arm_pos[0]; Eigen::Vector3d link2 = arm_pos[1]; Eigen::Vector3d link3 = arm_pos[2];
+		Eigen::Vector3d link4 = arm_pos[3]; Eigen::Vector3d link5 = arm_pos[4]; Eigen::Vector3d link6 = arm_pos[5];
+
+		// line from origin to end of link 1
+		arm_verts.push_back(0.0f); arm_verts.push_back(0.0f); arm_verts.push_back(0.0f);
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+		arm_verts.push_back(link1(0)); arm_verts.push_back(link1(1)); arm_verts.push_back(link1(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+
+		// line from end of link1 to end of link 2
+		arm_verts.push_back(link1(0)); arm_verts.push_back(link1(1)); arm_verts.push_back(link1(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+		arm_verts.push_back(link2(0)); arm_verts.push_back(link2(1)); arm_verts.push_back(link2(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+
+		// line from end of link2 to end of link 3
+		arm_verts.push_back(link2(0)); arm_verts.push_back(link2(1)); arm_verts.push_back(link2(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+		arm_verts.push_back(link3(0)); arm_verts.push_back(link3(1)); arm_verts.push_back(link3(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+
+		// wrist joint 1
+		arm_verts.push_back(link3(0)); arm_verts.push_back(link3(1)); arm_verts.push_back(link3(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+		arm_verts.push_back(link4(0)); arm_verts.push_back(link4(1)); arm_verts.push_back(link4(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+
+		// wrist joint 2
+		arm_verts.push_back(link4(0)); arm_verts.push_back(link4(1)); arm_verts.push_back(link4(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+		arm_verts.push_back(link5(0)); arm_verts.push_back(link5(1)); arm_verts.push_back(link5(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+
+		// wrist joint 3
+		arm_verts.push_back(link5(0)); arm_verts.push_back(link5(1)); arm_verts.push_back(link5(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+		arm_verts.push_back(link6(0)); arm_verts.push_back(link6(1)); arm_verts.push_back(link6(2));
+		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+
+		return arm_verts;
+	}
+
+	vector<float> defineClaw(float t1, float t2, float t3, float t4, float t5, float t6) {
+		vector<float> claw_verts;
+		wrist_base = arm_pos.back();
+		// find perpendicular lines
+		MatrixXd R_roll(3, 3);
+		R_roll << 1, 0, 0,
+			0, cos(t4), -sin(t4),
+			0, sin(t4), cos(t4);
+
+		MatrixXd R_pitch(3, 3);
+		R_pitch << cos(t5), 0, sin(t5),
+			0, 1, 0,
+			-sin(t5), 0, cos(t5);
+
+		MatrixXd R_yaw(3, 3);
+		R_yaw << cos(t6), -sin(t6), 0,
+			sin(t6), cos(t6), 0,
+			0, 0, 1;
+		
+		claw_base = 2*(R_roll* claw_base).normalized();
+		//claw_base = 2*claw_base.cross(wrist_base).normalized();
+		claw_left = 2*arm_pos.back().normalized();
+		claw_right = 2* arm_pos.back().normalized();
+
+		Eigen::Vector3d left_wb_point = wrist_base + 0.5 * claw_base;
+		Eigen::Vector3d right_wb_point = wrist_base - 0.5 * claw_base;
+
+		Eigen::Vector3d claw_left_point = claw_left + left_wb_point;
+		Eigen::Vector3d claw_right_point = claw_right + right_wb_point;
+
+		cout << "\nwrist_base: " << wrist_base.transpose() << "\n";
+		cout << "left_wb_point: " << left_wb_point.transpose() << "\n";
+		cout << "right_wb_point: " << right_wb_point.transpose() << "\n";
+		cout << "claw_left_point: " << claw_left_point.transpose() << "\n";
+		cout << "claw_right_point: " << claw_right_point.transpose() << "\n";
+
+		// line from wrist to left of wrist base	
+		claw_verts.push_back(wrist_base(0)); claw_verts.push_back(wrist_base(1)); claw_verts.push_back(wrist_base(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+		claw_verts.push_back(left_wb_point(0)); claw_verts.push_back(left_wb_point(1)); claw_verts.push_back(left_wb_point(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+
+		// line from wrist to right of wrist base	
+		claw_verts.push_back(wrist_base(0)); claw_verts.push_back(wrist_base(1)); claw_verts.push_back(wrist_base(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+		claw_verts.push_back(right_wb_point(0)); claw_verts.push_back(right_wb_point(1)); claw_verts.push_back(right_wb_point(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+
+		// line from claw left to left of end of claw
+		claw_verts.push_back(left_wb_point(0)); claw_verts.push_back(left_wb_point(1)); claw_verts.push_back(left_wb_point(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+		claw_verts.push_back(claw_left_point(0)); claw_verts.push_back(claw_left_point(1)); claw_verts.push_back(claw_left_point(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+
+		// line from claw right to right of end of claw
+		claw_verts.push_back(right_wb_point(0)); claw_verts.push_back(right_wb_point(1)); claw_verts.push_back(right_wb_point(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+		claw_verts.push_back(claw_right_point(0)); claw_verts.push_back(claw_right_point(1)); claw_verts.push_back(claw_right_point(2));
+		claw_verts.push_back(1.0f); claw_verts.push_back(0.0f); claw_verts.push_back(0.0f);		//color
+
+		return claw_verts;
+	}
+};
+
+struct Target {
+	vector<float> target_verts;
+	//defult constructor
+
+	Target() {}
+
+	vector<float> defineTarget(float x, float y, float z) {
+		float l = 1.0f;
+		target_verts = {
+			x - l, y - l, z + l,   1,1,1,
+			x + l, y - l, z + l,   1,1,1,
+			x + l, y + l, z + l,   1,1,1,
+
+			x - l, y - l, z + l,   1,1,1,
+			x + l, y + l, z + l,   1,1,1,
+			x - l, y + l, z + l,   1,1,1,
+
+			// Back face (1,1,1)
+			x - l, y - l, z - l,   1,1,1,
+			x + l, y + l, z - l,   1,1,1,
+			x + l, y - l, z - l,   1,1,1,
+
+			x - l, y - l, z - l,   1,1,1,
+			x - l, y + l, z - l,   1,1,1,
+			x + l, y + l, z - l,   1,1,1,
+
+			// Left face (1,1,1)
+			x - l, y - l, z - l,   1,1,1,
+			x - l, y + l, z + l,   1,1,1,
+			x - l, y - l, z + l,   1,1,1,
+
+			x - l, y - l, z - l,   1,1,1,
+			x - l, y + l, z - l,   1,1,1,
+			x - l, y + l, z + l,   1,1,1,
+
+			// Right face (1,1,1)
+			x + l, y - l, z - l,   1,1,1,
+			x + l, y - l, z + l,   1,1,1,
+			x + l, y + l, z + l,   1,1,1,
+
+			x + l, y - l, z - l,   1,1,1,
+			x + l, y + l, z + l,   1,1,1,
+			x + l, y + l, z - l,   1,1,1,
+
+			// Top face (1,1,1)
+			x - l, y + l, z + l,   1,1,1,
+			x + l, y + l, z + l,   1,1,1,
+			x + l, y + l, z - l,   1,1,1,
+
+			x - l, y + l, z + l,   1,1,1,
+			x + l, y + l, z - l,   1,1,1,
+			x - l, y + l, z - l,   1,1,1,
+
+			// Bottom face (1,1,1)
+			x - l, y - l, z + l,   1,1,1,
+			x + l, y - l, z - l,   1,1,1,
+			x + l, y - l, z + l,   1,1,1,
+
+			x - l, y - l, z + l,   1,1,1,
+			x - l, y - l, z - l,   1,1,1,
+			x + l, y - l, z - l,   1,1,1,
+		};
+
+		return target_verts;
+	}
+};
+
 struct Engine {
+
+	ArmVertices arm;
+	Target target;
+
 	//axis lines
 	vector<float> axis = {
 		//positions									//colors
@@ -233,38 +508,43 @@ struct Engine {
 		0.0f,-20.0f,0.0f,			0.0f,0.0f,1.0f,
 
 		// Z axis - green
-		0.0f,0.0f,20.0f,				0.0f,1.0f,0.0f,
+		0.0f,0.0f,20.0f,			0.0f,1.0f,0.0f,
 		0.0f,0.0f,-20.0f,			0.0f,1.0f,0.0f,
 	};
 
-	vector<float> points;
-	vector<float> vertices;
+	vector<float> vertices; vector<float> target_verts;
 
 	// lines VAO/VBO 
 	GLuint VAO_lines, VBO_lines;
-	GLuint VAO_points, VBO_points;
+	GLuint VAO_target, VBO_target;	
 	GLuint VAO_axis, VBO_axis;
 
-	int line_count = 0, point_count = 0;
+	int line_count = 0;
+
+	Engine(float _x, float _y, float _z, float _roll, float _pitch, float _yaw) 
+		: arm(_x, _y, _z, _roll, _pitch, _yaw)
+	{}
+
 
 	void loadRender() {
 
-		for (int i = 0; i < 15; i++) {
-			uniform_real_distribution<float>rand_x(-l2, l2);
-			uniform_real_distribution<float>rand_yz(-l1, l3);
-			float tar_x = rand_x(gen);
-			float tar_y = rand_yz(gen);
-			float tar_z = rand_yz(gen);
+		arm.animateAngles();
 
-			tuple<float, float, float> angles = ik(tar_x, tar_y, tar_z);
-			fk_test(get<0>(angles), get<1>(angles), get<2>(angles));
+		target_verts = target.defineTarget(arm.x,arm.y,arm.z);
+		vertices = arm.getVerts();
 
-			vector<float> temp = simulate_angles(get<0>(angles), get<1>(angles), get<2>(angles));
-			vertices.insert(vertices.end(), temp.begin(), temp.end());
+		int total_floats = (int)vertices.size();
+		int total_vertices = total_floats / 6; // because 6 floats per vertex
+		int verts_per_frame = 20; // expected: 9 lines * 2 vertices = 18
+		cout << "\nTotal number of vertices to render: " << vertices.size() / 6 << "\n";
+		std::cout << "floats: " << total_floats
+			<< "  vertices: " << total_vertices
+			<< "  verts_per_frame: " << verts_per_frame
+			<< "  frames (floor): " << (total_vertices / verts_per_frame)
+			<< "  remainder: " << (total_vertices % verts_per_frame)
+			<< std::endl;
 
-			vector<float>pt_temp = { tar_x, tar_y, tar_z, 1.0f, 0.0f, 0.0f };
-			points.insert(points.end(), pt_temp.begin(), pt_temp.end());
-		}
+		// ==================== Lines VAO/VBO =============
 
 		glGenVertexArrays(1, &VAO_lines);
 		glGenBuffers(1, &VBO_lines);
@@ -294,12 +574,13 @@ struct Engine {
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
 		glEnableVertexAttribArray(1);
 
-		// ==================== points VAO/VBO =============
-		glGenVertexArrays(1, &VAO_points);
-		glGenBuffers(1, &VBO_points);
-		glBindVertexArray(VAO_points);
-		glBindBuffer(GL_ARRAY_BUFFER, VBO_points);
-		glBufferData(GL_ARRAY_BUFFER, points.size() * sizeof(float), points.data(), GL_DYNAMIC_DRAW);
+		
+		// ==================== Target VAO/VBO =============
+		glGenVertexArrays(1, &VAO_target);
+		glGenBuffers(1, &VBO_target);
+		glBindVertexArray(VAO_target);
+		glBindBuffer(GL_ARRAY_BUFFER, VBO_target);
+		glBufferData(GL_ARRAY_BUFFER, target_verts.size() * sizeof(float), target_verts.data(), GL_DYNAMIC_DRAW);
 
 		//positions
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
@@ -308,12 +589,21 @@ struct Engine {
 		//color
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
 		glEnableVertexAttribArray(1);
+		
 	}
 
 	void draw(glm::mat4 view, glm::mat4 model, glm::mat4 projection, float dt, float delay) {
+		
+		// ================= Draw Lines ============
 		// Upload vertices to GPU
 		glBindBuffer(GL_ARRAY_BUFFER, VBO_lines);
 		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
+
+		glBindBuffer(GL_ARRAY_BUFFER, VBO_axis);
+		glBufferData(GL_ARRAY_BUFFER, axis.size() * sizeof(float), axis.data(), GL_DYNAMIC_DRAW);
+
+		glBindBuffer(GL_ARRAY_BUFFER, VBO_target);
+		glBufferData(GL_ARRAY_BUFFER, target_verts.size() * sizeof(float), target_verts.data(), GL_DYNAMIC_DRAW);
 
 		// Use shader
 		GLuint shaderProgram = CreateShaderProgram();
@@ -323,44 +613,44 @@ struct Engine {
 		glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
 		//define line width and point size
-		glLineWidth(10.0f);
-		glPointSize(15.0f);
+		glLineWidth(7.0f);
 
-		glLineWidth(5.0f);
+		const int verts_num = 20;		// number of vertices per frame (10 lines, 2 vertices each)
+
+		// ========== Draw axis ==========
 		glBindVertexArray(VAO_axis);
 		glDrawArrays(GL_LINES, 0, axis.size() / 6);
 
-		// Draw the next line
-		glBindVertexArray(VAO_lines);
-		glDrawArrays(GL_LINES, line_count, 2 * 3); // 2 vertices per line
+		// ========= Draw Target ==========
+		glBindVertexArray(VAO_target);
+		glDrawArrays(GL_TRIANGLES, 0, 36);
 
-		// Draw points
-		glBindVertexArray(VAO_points);
-		glDrawArrays(GL_POINTS, point_count, 1);
 
 		if (dt > delay) {
-			line_count += 2 * 3;	//draw 3 lines at a time
+			line_count += verts_num;
 			if (line_count >= vertices.size() / 6) {
-				line_count = 0; // Reset to the beginning
-			}
-
-			point_count++;
-			if (point_count >= points.size() / 6) {
-				point_count = 0; // Reset to the beginning
+				line_count = 0; // Reset frame count
+				cout << "\nCompleted animation cycle. Resetting frame count to 0.\n";
 			}
 		}
+
+		// ========== Draw arm lines ==========
+		glBindVertexArray(VAO_lines);
+		//glDrawArrays(GL_LINES, 1000,1020);
+		glDrawArrays(GL_LINES, line_count, verts_num);
+		
 	}
 };
 
 void render() {
-	Engine engine;
+	Engine engine(26.07f, 25.67f, -2.94f, -PI/4.2f,PI/2.1f,PI/10.1f); //initialize engine with target position
 	// GLFW init for the window
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-	GLFWwindow* window = glfwCreateWindow(1600, 1200, "Line Test", NULL, NULL);
+	GLFWwindow* window = glfwCreateWindow(1600, 1200, "Arm Simulation", NULL, NULL);
 	glfwMakeContextCurrent(window);
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
@@ -378,12 +668,13 @@ void render() {
 		return;
 	}
 
+	//initialize the rendering engine with some points and lines
 	engine.loadRender();
 
 	// ================ Set camera view =================
 
 	// Initial camera position 	
-	glm::vec3 init_camPos = { 0.0f, 0.0f, 40.0f };
+	glm::vec3 init_camPos = { 0.0f, 10.0f, 40.0f };
 	glm::vec3 cameraFront = glm::vec3(0, 0, -1);
 
 	// Initial view and position
@@ -399,11 +690,11 @@ void render() {
 	// Setting initial conditions
 	glm::vec3 curr_camPos = init_camPos;
 
+
 	glEnable(GL_DEPTH_TEST);
+	float last_time = glfwGetTime(), delay = 0.005f;
 
-	float last_time = glfwGetTime(), delay = 0.6f;
-
-	// ======== Render Loop ========
+	//renderloop
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 		float curr_time = glfwGetTime();
@@ -411,13 +702,14 @@ void render() {
 		glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+		//set camera movements and model positions
 		glm::vec3 camOffsets = getCamMovement(window);
 		float modelAngleoffsets = getCamRotation(window).first; 
 		glm::vec3 modelRotAxis = getCamRotation(window).second;
 
 		cameraPos = curr_camPos + camOffsets;
 
-		// Reset position
+		//reset position
 		if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
 			cameraTarget = { 0.0f, 0.0f, 0.0f };
 			cameraPos = init_camPos;
@@ -428,7 +720,8 @@ void render() {
 
 		glm::vec3 cameraTarget = cameraPos + cameraFront;
 		glm::mat4 view = glm::lookAt(cameraPos, cameraTarget, cameraUp);
-		curr_camPos += camOffsets;
+		
+		curr_camPos += camOffsets;			//reset 
 
 		model = glm::rotate(model, modelAngleoffsets, modelRotAxis); // rotate the model without moving camera
 			
@@ -438,7 +731,9 @@ void render() {
 			cout << "fixing viewport...";
 		}
 
+		//draw lines and points with delay
 		float dt = curr_time - last_time;
+
 		engine.draw(view, model, projection, dt, delay);
  
 		if (curr_time - last_time > delay) {
@@ -448,6 +743,6 @@ void render() {
 		glfwSwapBuffers(window);
 
 		//control speed of rendering
-		this_thread::sleep_for(std::chrono::milliseconds(16));
+		this_thread::sleep_for(std::chrono::milliseconds(16));		// ~60 FPS
 	}
 }

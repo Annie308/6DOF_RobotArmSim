@@ -30,7 +30,6 @@ const char* window_name = "test edges";
 static void CannyThreshold(int, void*) {
 	//blur with filter of kernel size 3
 	blur(src_gray, detected_edges, Size(3, 3));
-
 	//apply canny
 	Canny(detected_edges, detected_edges, lowThreshold, highThreshold * ratio, kernel_size);
 
@@ -41,7 +40,6 @@ static void CannyThreshold(int, void*) {
 	src.copyTo(dst, detected_edges);
 
 	imshow(window_name, dst);
-
 }
 
 void find_target() {
