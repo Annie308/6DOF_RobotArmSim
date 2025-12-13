@@ -15,9 +15,6 @@
 #include "arm_attributes.h"
 #include "get_path.h"
 
-//for math constants
-#define _USE_MATH_DEFINES
-
 using namespace cv;
 
 Mat src, src_gray;

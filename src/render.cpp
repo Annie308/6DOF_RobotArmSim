@@ -219,28 +219,23 @@ pair<float,glm::vec3> getCamRotation(GLFWwindow*& window) {
 //given joint angles, define arm vertices for rendering
 
 struct ArmVertices {
-	Eigen::Vector3d claw_base{ 0.0, 0.0, 1.f };
-	Eigen::Vector3d claw_left{ 1.0, 0.0, 0.0f };
-	Eigen::Vector3d claw_right{ 1.0, 0.0, 0.0f };
 
-	vector<float> vertices; 
-	float x; float y; float z; 
+	vector<float> vertices; vector<float> points;
+	float x; float y; float z;
 	float pitch; float roll; float yaw;
-	vector<Eigen::Vector3d> arm_pos; // store joint positions
-	Eigen::Vector3d wrist_base; 
 
 	ArmVertices(float _x, float _y, float _z, float _roll, float _pitch, float _yaw) : x(_x), y(_y), z(_z), roll(_roll), pitch(_pitch), yaw(_yaw)
-	{}
+	{
+	}
 
 	void animateAngles() {
 		float step = 0.05f;
-		float init_t1 = 0, init_t2 = 0, init_t3 = 0, init_t4 = 0, init_t5 = 0, init_t6 = 0;
 
 		// compute arm joint angles and positions
 		Eigen::Vector3d arm_angles = ik(x, y, z);
 		float t1 = arm_angles(0); float t2 = arm_angles(1); float t3 = arm_angles(2);
 
-		Eigen::Vector3d wrist_angles = wristIK(x, y, z, roll, pitch, yaw);
+		Eigen::Vector3d wrist_angles = wristIk(x, y, z, roll, pitch, yaw);
 		float t4 = wrist_angles(0); float t5 = wrist_angles(1); float t6 = wrist_angles(2);
 
 		enum class angleIndices : char {
@@ -274,14 +269,15 @@ struct ArmVertices {
 				case angleIndices::T3:
 					t_3 = t_3 + dx * (t3 - t_3);
 					break;
-				}
-				vector<float> arm_temp = defineArm(t_1, t_2, t_3, t_4, t_5, t_6);
+			}
+				vector<float> arm_temp = defineArm(x,y,z,t_1, t_2, t_3, t_4, t_5, t_6);
 				vector<float> claw_temp = defineClaw(t_1, t_2, t_3, t_4, t_5, t_6);
 
 				vertices.insert(vertices.end(), arm_temp.begin(), arm_temp.end());
 				vertices.insert(vertices.end(), claw_temp.begin(), claw_temp.end());
 			}
 		}
+
 		for (float dx = 0.0f; dx <= 1.0f; dx += step) {
 			for (angleIndices t : wristAngles) {
 				switch (t) {
@@ -295,31 +291,30 @@ struct ArmVertices {
 					t_6 = t_6 + dx * (t6 - t_6);
 					break;
 				}
-				vector<float> arm_temp = defineArm(t_1, t_2, t_3, t_4, t_5, t_6);
+				vector<float> arm_temp = defineArm(x,y,z,t_1, t_2, t_3, t_4, t_5, t_6);
 				vector<float> claw_temp = defineClaw(t_1, t_2, t_3, t_4, t_5, t_6);
 
 				vertices.insert(vertices.end(), arm_temp.begin(), arm_temp.end());
 				vertices.insert(vertices.end(), claw_temp.begin(), claw_temp.end());
+
+				Eigen::Vector3d end_eff_pos = fk(t_1, t_2, t_3, t_4, t_5, t_6).back();
+				points.push_back(end_eff_pos(0)); points.push_back(end_eff_pos(1)); points.push_back(end_eff_pos(2));
+				points.push_back(0.0f); points.push_back(1.0f); points.push_back(0.0f); 
 			}
 		}
-
-				/*
-				cout << "Animating to angles: " << t_1 << ", " << t_2 << ", " << t_3 << ", " << t_4 << ", " << t_5 << ", " << t_6 << endl;
-
-				cout << "\narm_temp size: " << arm_temp.size();
-				cout << "\nclaw_temp size: " << claw_temp.size();
-				*/
 	}
 
 	vector<float> getVerts() const { return vertices; }
+	vector<float> getPoints() const { return points; }
 
-	vector<float> defineArm(float t1, float t2, float t3, float t4, float t5, float t6) {
+	vector<float> defineArm(float x, float y, float z, float t1, float t2, float t3, float t4, float t5, float t6) {
 		vector<float> arm_verts;
 
-		arm_pos = fk(t1, t2, t3, t4, t5, t6);
-
+		vector<Eigen::Vector3d> arm_pos = fk(t1, t2, t3, t4, t5, t6);
+		
 		Eigen::Vector3d link1 = arm_pos[0]; Eigen::Vector3d link2 = arm_pos[1]; Eigen::Vector3d link3 = arm_pos[2];
-		Eigen::Vector3d link4 = arm_pos[3]; Eigen::Vector3d link5 = arm_pos[4]; Eigen::Vector3d link6 = arm_pos[5];
+		Eigen::Vector3d link4 = arm_pos[3]; Eigen::Vector3d link5 = arm_pos[4]; Eigen::Vector3d link5_1 = arm_pos[5];
+		Eigen::Vector3d link5_2 = arm_pos[6]; Eigen::Vector3d link6 = arm_pos[7];
 
 		// line from origin to end of link 1
 		arm_verts.push_back(0.0f); arm_verts.push_back(0.0f); arm_verts.push_back(0.0f);
@@ -341,9 +336,9 @@ struct ArmVertices {
 
 		// wrist joint 1
 		arm_verts.push_back(link3(0)); arm_verts.push_back(link3(1)); arm_verts.push_back(link3(2));
-		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
 		arm_verts.push_back(link4(0)); arm_verts.push_back(link4(1)); arm_verts.push_back(link4(2));
-		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
 
 		// wrist joint 2
 		arm_verts.push_back(link4(0)); arm_verts.push_back(link4(1)); arm_verts.push_back(link4(2));
@@ -353,48 +348,71 @@ struct ArmVertices {
 
 		// wrist joint 3
 		arm_verts.push_back(link5(0)); arm_verts.push_back(link5(1)); arm_verts.push_back(link5(2));
-		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+		arm_verts.push_back(link5_1(0)); arm_verts.push_back(link5_1(1)); arm_verts.push_back(link5_1(2));
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+
+		// wrist joint 3
+		arm_verts.push_back(link5_1(0)); arm_verts.push_back(link5_1(1)); arm_verts.push_back(link5_1(2));
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+		arm_verts.push_back(link5_2(0)); arm_verts.push_back(link5_2(1)); arm_verts.push_back(link5_2(2));
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); //color
+
+		// wrist joint 3
+		arm_verts.push_back(link5_2(0)); arm_verts.push_back(link5_2(1)); arm_verts.push_back(link5_2(2));
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.5f); //color
 		arm_verts.push_back(link6(0)); arm_verts.push_back(link6(1)); arm_verts.push_back(link6(2));
-		arm_verts.push_back(1.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.0f); //color
+		arm_verts.push_back(0.0f); arm_verts.push_back(1.0f); arm_verts.push_back(0.5f); //color
 
 		return arm_verts;
 	}
 
 	vector<float> defineClaw(float t1, float t2, float t3, float t4, float t5, float t6) {
+
 		vector<float> claw_verts;
-		wrist_base = arm_pos.back();
-		// find perpendicular lines
-		MatrixXd R_roll(3, 3);
-		R_roll << 1, 0, 0,
+		vector<Eigen::Vector3d> arm_pos = fk(t1, t2, t3, t4, t5, t6);
+		Eigen::Vector3d wrist_base = arm_pos.back();
+		//roll about X
+		MatrixXd rot4(3, 3);
+		rot4 << 1, 0, 0,
 			0, cos(t4), -sin(t4),
 			0, sin(t4), cos(t4);
 
-		MatrixXd R_pitch(3, 3);
-		R_pitch << cos(t5), 0, sin(t5),
+		//roll about Y
+		MatrixXd rot5(3, 3);
+		rot5 << cos(t5), 0, sin(t5),
 			0, 1, 0,
 			-sin(t5), 0, cos(t5);
 
-		MatrixXd R_yaw(3, 3);
-		R_yaw << cos(t6), -sin(t6), 0,
-			sin(t6), cos(t6), 0,
-			0, 0, 1;
-		
-		claw_base = 2*(R_roll* claw_base).normalized();
-		//claw_base = 2*claw_base.cross(wrist_base).normalized();
-		claw_left = 2*arm_pos.back().normalized();
-		claw_right = 2* arm_pos.back().normalized();
+		//pitch about X
+		MatrixXd rot6(3, 3);
+		rot6 << 1, 0, 0,
+			0, cos(t6), -sin(t6),
+			0, sin(t6), cos(t6);
 
-		Eigen::Vector3d left_wb_point = wrist_base + 0.5 * claw_base;
-		Eigen::Vector3d right_wb_point = wrist_base - 0.5 * claw_base;
+		Eigen::Vector3d wrist_link = arm_pos.back() - arm_pos[arm_pos.size()-2];
+
+		cout << "End eff pos " << arm_pos.back().transpose() << endl;
+
+		Eigen::Vector3d perp_base{ 0.0f, 1.0, 0.0f };			//for the base of claw
+		Eigen::Vector3d perp_pinch{ 0.0f, 1.0, 0.0f };			//for the base of claw
+
+		//Eigen::Vector3d perp = { wrist_base(0), wrist_base(1), 0.0f };
+		Eigen::Vector3d wrist_offset = perp_base.cross(wrist_link).normalized();
+
+		//wrist_offset = rot6 *wrist_offset;
+
+		Eigen::Vector3d claw_left{ 1.0, 0.0, 0.0f };
+		Eigen::Vector3d claw_right{ 1.0, 0.0, 0.0f };
+
+		claw_left = -perp_pinch.cross(wrist_offset).normalized() * 2.0;
+		claw_right = -perp_pinch.cross(wrist_offset).normalized() * 2.0;
+
+		Eigen::Vector3d left_wb_point = wrist_base + 0.5 * wrist_offset;
+		Eigen::Vector3d right_wb_point = wrist_base - 0.5 * wrist_offset;
 
 		Eigen::Vector3d claw_left_point = claw_left + left_wb_point;
 		Eigen::Vector3d claw_right_point = claw_right + right_wb_point;
-
-		cout << "\nwrist_base: " << wrist_base.transpose() << "\n";
-		cout << "left_wb_point: " << left_wb_point.transpose() << "\n";
-		cout << "right_wb_point: " << right_wb_point.transpose() << "\n";
-		cout << "claw_left_point: " << claw_left_point.transpose() << "\n";
-		cout << "claw_right_point: " << claw_right_point.transpose() << "\n";
 
 		// line from wrist to left of wrist base	
 		claw_verts.push_back(wrist_base(0)); claw_verts.push_back(wrist_base(1)); claw_verts.push_back(wrist_base(2));
@@ -428,63 +446,85 @@ struct Target {
 	vector<float> target_verts;
 	//defult constructor
 
+	enum class targetColors : char {
+		RED,
+		GREEN,
+		BLUE
+	};
+
 	Target() {}
 
-	vector<float> defineTarget(float x, float y, float z) {
-		float l = 1.0f;
+	vector<float> defineTarget(float x, float y, float z, targetColors color, float size) {
+		float l = size;
+		float c1, c2, c3;
+
+		switch (color) {
+		case (targetColors::RED):
+				c1 = 1.0f; c2 = 0.0f; c3 = 0.0f;
+				break;
+		case (targetColors::GREEN):
+				c1 = 0.0f; c2 = 1.0f; c3 = 0.0f;
+				break;
+		case (targetColors::BLUE):
+			c1 = 0.0f; c2 = 0.0f; c3 = 1.0f;
+			break;
+		default:
+			c1 = 1.0f; c2 = 1.0f; c3 = 1.0f;
+		}
+
 		target_verts = {
-			x - l, y - l, z + l,   1,1,1,
-			x + l, y - l, z + l,   1,1,1,
-			x + l, y + l, z + l,   1,1,1,
+			x - l, y - l, z + l,   c1,c2,c3,
+			x + l, y - l, z + l,   c1,c2,c3,
+			x + l, y + l, z + l,   c1,c2,c3,
 
-			x - l, y - l, z + l,   1,1,1,
-			x + l, y + l, z + l,   1,1,1,
-			x - l, y + l, z + l,   1,1,1,
+			x - l, y - l, z + l,   c1,c2,c3,
+			x + l, y + l, z + l,   c1,c2,c3,
+			x - l, y + l, z + l,   c1,c2,c3,
 
-			// Back face (1,1,1)
-			x - l, y - l, z - l,   1,1,1,
-			x + l, y + l, z - l,   1,1,1,
-			x + l, y - l, z - l,   1,1,1,
+			// Back face (c1,c2,c3)
+			x - l, y - l, z - l,   c1,c2,c3,
+			x + l, y + l, z - l,   c1,c2,c3,
+			x + l, y - l, z - l,   c1,c2,c3,
 
-			x - l, y - l, z - l,   1,1,1,
-			x - l, y + l, z - l,   1,1,1,
-			x + l, y + l, z - l,   1,1,1,
+			x - l, y - l, z - l,   c1,c2,c3,
+			x - l, y + l, z - l,   c1,c2,c3,
+			x + l, y + l, z - l,   c1,c2,c3,
 
-			// Left face (1,1,1)
-			x - l, y - l, z - l,   1,1,1,
-			x - l, y + l, z + l,   1,1,1,
-			x - l, y - l, z + l,   1,1,1,
+			// Left face (c1,c2,c3)
+			x - l, y - l, z - l,   c1,c2,c3,
+			x - l, y + l, z + l,   c1,c2,c3,
+			x - l, y - l, z + l,   c1,c2,c3,
 
-			x - l, y - l, z - l,   1,1,1,
-			x - l, y + l, z - l,   1,1,1,
-			x - l, y + l, z + l,   1,1,1,
+			x - l, y - l, z - l,   c1,c2,c3,
+			x - l, y + l, z - l,   c1,c2,c3,
+			x - l, y + l, z + l,   c1,c2,c3,
 
-			// Right face (1,1,1)
-			x + l, y - l, z - l,   1,1,1,
-			x + l, y - l, z + l,   1,1,1,
-			x + l, y + l, z + l,   1,1,1,
+			// Right face (c1,c2,c3)
+			x + l, y - l, z - l,   c1,c2,c3,
+			x + l, y - l, z + l,   c1,c2,c3,
+			x + l, y + l, z + l,   c1,c2,c3,
 
-			x + l, y - l, z - l,   1,1,1,
-			x + l, y + l, z + l,   1,1,1,
-			x + l, y + l, z - l,   1,1,1,
+			x + l, y - l, z - l,   c1,c2,c3,
+			x + l, y + l, z + l,   c1,c2,c3,
+			x + l, y + l, z - l,   c1,c2,c3,
 
-			// Top face (1,1,1)
-			x - l, y + l, z + l,   1,1,1,
-			x + l, y + l, z + l,   1,1,1,
-			x + l, y + l, z - l,   1,1,1,
+			// Top face (c1,c2,c3)
+			x - l, y + l, z + l,   c1,c2,c3,
+			x + l, y + l, z + l,   c1,c2,c3,
+			x + l, y + l, z - l,   c1,c2,c3,
 
-			x - l, y + l, z + l,   1,1,1,
-			x + l, y + l, z - l,   1,1,1,
-			x - l, y + l, z - l,   1,1,1,
+			x - l, y + l, z + l,   c1,c2,c3,
+			x + l, y + l, z - l,   c1,c2,c3,
+			x - l, y + l, z - l,   c1,c2,c3,
 
-			// Bottom face (1,1,1)
-			x - l, y - l, z + l,   1,1,1,
-			x + l, y - l, z - l,   1,1,1,
-			x + l, y - l, z + l,   1,1,1,
+			// Bottom face
+			x - l, y - l, z + l,   c1,c2,c3,
+			x + l, y - l, z - l,   c1,c2,c3,
+			x + l, y - l, z + l,   c1,c2,c3,
 
-			x - l, y - l, z + l,   1,1,1,
-			x - l, y - l, z - l,   1,1,1,
-			x + l, y - l, z - l,   1,1,1,
+			x - l, y - l, z + l,   c1,c2,c3,
+			x - l, y - l, z - l,   c1,c2,c3,
+			x + l, y - l, z - l,   c1,c2,c3,
 		};
 
 		return target_verts;
@@ -495,7 +535,6 @@ struct Engine {
 
 	ArmVertices arm;
 	Target target;
-
 	//axis lines
 	vector<float> axis = {
 		//positions									//colors
@@ -512,12 +551,13 @@ struct Engine {
 		0.0f,0.0f,-20.0f,			0.0f,1.0f,0.0f,
 	};
 
-	vector<float> vertices; vector<float> target_verts;
+	vector<float> vertices; vector<float> target_verts; vector<float> points;
 
 	// lines VAO/VBO 
 	GLuint VAO_lines, VBO_lines;
 	GLuint VAO_target, VBO_target;	
 	GLuint VAO_axis, VBO_axis;
+	GLuint VAO_points, VBO_points;
 
 	int line_count = 0;
 
@@ -530,19 +570,12 @@ struct Engine {
 
 		arm.animateAngles();
 
-		target_verts = target.defineTarget(arm.x,arm.y,arm.z);
+		target_verts = target.defineTarget(arm.x,arm.y,arm.z, Target::targetColors::RED, 0.5);
 		vertices = arm.getVerts();
+		points = arm.getPoints();
 
 		int total_floats = (int)vertices.size();
 		int total_vertices = total_floats / 6; // because 6 floats per vertex
-		int verts_per_frame = 20; // expected: 9 lines * 2 vertices = 18
-		cout << "\nTotal number of vertices to render: " << vertices.size() / 6 << "\n";
-		std::cout << "floats: " << total_floats
-			<< "  vertices: " << total_vertices
-			<< "  verts_per_frame: " << verts_per_frame
-			<< "  frames (floor): " << (total_vertices / verts_per_frame)
-			<< "  remainder: " << (total_vertices % verts_per_frame)
-			<< std::endl;
 
 		// ==================== Lines VAO/VBO =============
 
@@ -589,21 +622,25 @@ struct Engine {
 		//color
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
 		glEnableVertexAttribArray(1);
+
+		// ==================== Point VAO/VBO =============
+		glGenVertexArrays(1, &VAO_points);
+		glGenBuffers(1, &VBO_points);
+		glBindVertexArray(VAO_points);
+		glBindBuffer(GL_ARRAY_BUFFER, VBO_points);
+		glBufferData(GL_ARRAY_BUFFER, points.size() * sizeof(float), points.data(), GL_DYNAMIC_DRAW);
+
+		//positions
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+		glEnableVertexAttribArray(0);
+
+		//color
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+		glEnableVertexAttribArray(1);
 		
 	}
 
 	void draw(glm::mat4 view, glm::mat4 model, glm::mat4 projection, float dt, float delay) {
-		
-		// ================= Draw Lines ============
-		// Upload vertices to GPU
-		glBindBuffer(GL_ARRAY_BUFFER, VBO_lines);
-		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
-
-		glBindBuffer(GL_ARRAY_BUFFER, VBO_axis);
-		glBufferData(GL_ARRAY_BUFFER, axis.size() * sizeof(float), axis.data(), GL_DYNAMIC_DRAW);
-
-		glBindBuffer(GL_ARRAY_BUFFER, VBO_target);
-		glBufferData(GL_ARRAY_BUFFER, target_verts.size() * sizeof(float), target_verts.data(), GL_DYNAMIC_DRAW);
 
 		// Use shader
 		GLuint shaderProgram = CreateShaderProgram();
@@ -613,9 +650,10 @@ struct Engine {
 		glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
 		//define line width and point size
-		glLineWidth(7.0f);
+		glLineWidth(14.0f);
+		glPointSize(10.0f);	
 
-		const int verts_num = 20;		// number of vertices per frame (10 lines, 2 vertices each)
+		const int verts_num = 24;		// number of vertices per frame (10 lines, 2 vertices each)
 
 		// ========== Draw axis ==========
 		glBindVertexArray(VAO_axis);
@@ -625,25 +663,34 @@ struct Engine {
 		glBindVertexArray(VAO_target);
 		glDrawArrays(GL_TRIANGLES, 0, 36);
 
+		// ========== Draw arm lines ==========
+		glBindVertexArray(VAO_lines);
+		glDrawArrays(GL_LINES, line_count, verts_num);
+
+		// ========== Draw arm lines ==========
+		glBindVertexArray(VAO_points);
+		glDrawArrays(GL_POINTS, 0, points.size()/6);
 
 		if (dt > delay) {
 			line_count += verts_num;
 			if (line_count >= vertices.size() / 6) {
 				line_count = 0; // Reset frame count
-				cout << "\nCompleted animation cycle. Resetting frame count to 0.\n";
+				//cout << "\nCompleted animation cycle. Resetting frame count to 0.\n";
 			}
 		}
-
-		// ========== Draw arm lines ==========
-		glBindVertexArray(VAO_lines);
-		//glDrawArrays(GL_LINES, 1000,1020);
-		glDrawArrays(GL_LINES, line_count, verts_num);
-		
+	
 	}
 };
 
 void render() {
-	Engine engine(26.07f, 25.67f, -2.94f, -PI/4.2f,PI/2.1f,PI/10.1f); //initialize engine with target position
+	float x = 20.f;
+	float y = 20.0f;
+	float z = -5.f;
+	float roll = PI/2;
+	float pitch = 0;
+	float yaw = 0;
+
+	Engine engine(x, y,z, roll, pitch, yaw); //initialize engine with target position
 	// GLFW init for the window
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -674,7 +721,8 @@ void render() {
 	// ================ Set camera view =================
 
 	// Initial camera position 	
-	glm::vec3 init_camPos = { 0.0f, 10.0f, 40.0f };
+
+	glm::vec3 init_camPos = { 0.f, 0.f, 60.f};
 	glm::vec3 cameraFront = glm::vec3(0, 0, -1);
 
 	// Initial view and position
@@ -689,7 +737,6 @@ void render() {
 
 	// Setting initial conditions
 	glm::vec3 curr_camPos = init_camPos;
-
 
 	glEnable(GL_DEPTH_TEST);
 	float last_time = glfwGetTime(), delay = 0.005f;
@@ -710,14 +757,15 @@ void render() {
 		cameraPos = curr_camPos + camOffsets;
 
 		//reset position
-		if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+	
+		if (glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
 			cameraTarget = { 0.0f, 0.0f, 0.0f };
 			cameraPos = init_camPos;
 			curr_camPos = init_camPos;
 			model = glm::translate(model, { 0.0f,0.0f, 0.0f }); //reset model position
 			cout << "fixing to origin\n";
 		}
-
+		
 		glm::vec3 cameraTarget = cameraPos + cameraFront;
 		glm::mat4 view = glm::lookAt(cameraPos, cameraTarget, cameraUp);
 		
@@ -726,6 +774,7 @@ void render() {
 		model = glm::rotate(model, modelAngleoffsets, modelRotAxis); // rotate the model without moving camera
 			
 		// Reset rotation
+
 		if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
 			model = glm::mat4(1.0f);
 			cout << "fixing viewport...";
