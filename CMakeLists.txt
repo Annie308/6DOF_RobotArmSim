@@ -10,7 +10,7 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
-add_executable(arm src/main.cpp src/get_path.cpp src/calculations.cpp src/render.cpp src/glad.c)
+add_executable(arm src/main.cpp src/get_path.cpp src/calculations.cpp src/render.cpp src/glad.c )
 include_directories(
 	include 
 	${OpenCV_INCLUDE_DIRS}

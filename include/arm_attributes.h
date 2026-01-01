@@ -3,7 +3,7 @@
 
 //Defines information about the robot
 //lengths of the robot arm links
-inline extern const float l1 = 5.0f; 
+inline extern const float l1 = 5.0f;
 inline extern const float l2 = 10.0f;
 inline extern const float l3 = 10.f;
 inline extern const float l4 = 3.f;

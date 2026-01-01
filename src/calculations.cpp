@@ -1,13 +1,11 @@
-﻿#include <iostream>
-#include <cmath>
+﻿#include <cmath>
+#include <iostream>
 #include <random>
 #include <chrono>
 #include <thread>
 #include <optional>
 #include <algorithm>
-
 #include <Eigen/Dense>
-
 #include "render.h"
 #include "calculations.h"
 #include "arm_attributes.h"
@@ -16,10 +14,6 @@
 
 using Eigen::MatrixXd, Eigen::Vector3d;
 using namespace std;
-
-//random seeding
-unsigned seed = std::chrono::steady_clock::now().time_since_epoch().count();
-std::mt19937 gen(seed);
 
 Vector3d link1(0, l1, 0);
 Vector3d link2(l2, 0, 0);
@@ -42,7 +36,7 @@ vector<Vector3d> fk(float t1, float t2, float t3, float t4, float t5, float t6) 
 
 	// Rotation about Z
 	MatrixXd rot2(3, 3);
-	rot2 << cos(t2), -sin(t2),0,
+	rot2 << cos(t2), -sin(t2), 0,
 		sin(t2), cos(t2), 0,
 		0, 0, 1;
 
@@ -74,20 +68,20 @@ vector<Vector3d> fk(float t1, float t2, float t3, float t4, float t5, float t6) 
 	Eigen::Vector3d link1_end = rot1 * link1;
 	Eigen::Vector3d link2_end = rot1 * rot2 * link2 + link1_end;
 	Eigen::Vector3d link3_end = rot1 * rot2 * rot3 * link3 + link2_end;
-	
+
 	Eigen::Vector3d link4_end = rot4 * link4 + link3_end;
 	Eigen::Vector3d link5_end = rot4 * rot5 * link5 + link4_end;
 
-	Eigen::Vector3d link5_1 = -l5*(Eigen::Vector3d{0.0,0.0,1.0}.cross(link5_end-link4_end).normalized());
+	Eigen::Vector3d link5_1 = -l5 * (Eigen::Vector3d{ 0.0,0.0,1.0 }.cross(link5_end - link4_end).normalized());
 	Eigen::Vector3d link5_1_end = link5_1 + link5_end;
 	Eigen::Vector3d link5_2 = -l5 * (Eigen::Vector3d{ 0.0,0.0,1.0 }.cross(link5_1).normalized());
 	Eigen::Vector3d link5_2_end = link5_2 + link5_1_end;
 	Eigen::Vector3d link6_end = rot4 * rot5 * rot6 * link6 + link5_2_end;
 
-	return { link1_end, link2_end, link3_end, link4_end, link5_end, link5_1_end, link5_2_end, link6_end};
+	return { link1_end, link2_end, link3_end, link4_end, link5_end, link5_1_end, link5_2_end, link6_end };
 }
 static bool target_reached(float x, float y, float z, float t1, float t2, float t3) {
-	Eigen::Vector3d tar_vec = fk(t1, t2, t3,0,0,0).back();
+	Eigen::Vector3d tar_vec = fk(t1, t2, t3, 0, 0, 0).back();
 
 	float tolerance = 3.f;		//3 cm tolerance
 	cout << "Given point: (" << x << " ," << y << ", " << z << " ,), found (" << t1 << ", " << t2 << " " << t3 << ").\n";
@@ -95,7 +89,7 @@ static bool target_reached(float x, float y, float z, float t1, float t2, float 
 
 	cout << "Difference: (" << fabs(tar_vec(0) - x) << ", " << fabs(tar_vec(1) - y) << ", " << fabs(tar_vec(2) - z) << ")\n";
 	cout << " Tolerance: " << tolerance << "\n";
-	
+
 	if ((fabs(tar_vec(0) - x) < tolerance) && (fabs(tar_vec(1) - y) < tolerance) && (fabs(tar_vec(2) - z) < tolerance)) {
 		return true;
 	}
@@ -106,10 +100,10 @@ static bool target_reached(float x, float y, float z, float t1, float t2, float 
 Eigen::Vector3d ik(float x, float y, float z) {
 	Eigen::Vector3d p_target = Eigen::Vector3d(x, y, z);
 
-	p_target = p_target - link1 - link4 - link5_1 - link6;		
+	p_target = p_target - link1 - link4 - link5_1 - link6;
 
 	//angle away from XY plane
-	float t = atan2(z, x);
+	float t = atan2(p_target.z(), p_target.x());
 
 	//rotate on the y axis to project onto XY plane
 	MatrixXd proj_max(3, 3);
@@ -119,17 +113,18 @@ Eigen::Vector3d ik(float x, float y, float z) {
 
 	//projected point 
 	Eigen::Vector3d p_proj = proj_max * p_target;
-	
+
 	//defining new coordinates 
-	float x1 = p_proj(0), y1 = p_proj(1);
-	float r1 = sqrt(x1*x1 + y1 * y1);			//new length
-	float phi = atan2(y1, x1);					//angle from base to projected point
+	float x1 = p_proj.x(), y1 = p_proj.y();
 	
+	float r1 = sqrt(x1 * x1 + y1 * y1);			//new length
+	float phi = atan2(y1, x1);					//angle from base to projected point
+
 	//angle from the new point using cosine law
 	float cos_t2 = (l2 * l2 + r1 * r1 - (l3) * (l3)) / (2.f * l2 * r1);
 	cos_t2 = min(1.0f, max(-1.0f, cos_t2));						//constraints
-	
-	float cos_t3 = (l2 * l2 + (l3) * (l3) - r1 * r1) / (2.f * l2 * (l3));
+
+	float cos_t3 = (l2 * l2 + (l3) * (l3)-r1 * r1) / (2.f * l2 * (l3));
 	cos_t3 = min(1.0f, max(-1.0f, cos_t3));						//constraints
 
 	float t2 = phi - acos(cos_t2);
@@ -144,24 +139,24 @@ Eigen::Vector3d ik(float x, float y, float z) {
 	Eigen::Vector3d tar_vec = fk(t1, t2, t3, 0, 0, 0).back();
 
 	cout << "Given point: (" << x << " ," << y << ", " << z << " ,), found (" << t1 << ", " << t2 << " " << t3 << ").\n";
-	cout << "This will reach: " << tar_vec(0) << ", " << tar_vec(1)<< ", " << tar_vec(2) << ")\n";
+	cout << "This will reach: " << tar_vec(0) << ", " << tar_vec(1) << ", " << tar_vec(2) << ")\n";
 
 	return Eigen::Vector3d(t1, t2, t3);
-	
+
 	/*
 	//case 1: t 1 and t 2 >0
-	if (target_reached(x, y, z, t1, t2, t3)) { 
+	if (target_reached(x, y, z, t1, t2, t3)) {
 		cout << "Target is reachable.\n";
 		cout << "Returning angles: (" << t1 << ", " << -t2 << ", " << t3 << ")\n";
-		return Eigen::Vector3d(t1, t2, t3); 
+		return Eigen::Vector3d(t1, t2, t3);
 	}
 	//case 2: 1 > 0, 2 < 0
-	else if (target_reached(x, y, z, t1, -t2, t3)) { 
+	else if (target_reached(x, y, z, t1, -t2, t3)) {
 		cout << "Target is reachable.\n";
 		cout << "Returning angles: (" << t1 << ", " << -t2 << ", " << t3 << ")\n";
-		return Eigen::Vector3d(t1, -t2, t3); 
+		return Eigen::Vector3d(t1, -t2, t3);
 	}
-	
+
 	else {
 		cout << "Target is unreachable.\n";
 		return Eigen::Vector3d(0.0f, 0.0f, 0.0f);
@@ -211,7 +206,7 @@ Eigen::Vector3d wristIk(float x, float y, float z, float roll, float pitch, floa
 		sin(theta3), cos(theta3), 0,
 		0, 0, 1;
 
-	MatrixXd targetRot = rot1 * rot2 * rot3*R_roll * R_pitch * R_yaw;     // full FK pose
+	MatrixXd targetRot = rot1 * rot2 * rot3 * R_roll * R_pitch * R_yaw;     // full FK pose
 	MatrixXd goalRot = (rot1 * rot2 * rot3).transpose() * targetRot; // relative wrist rotation
 
 	cout << "\n ==========Wrist IK Results==========\n";
@@ -231,7 +226,7 @@ Eigen::Vector3d wristIk(float x, float y, float z, float roll, float pitch, floa
 
 	if (gimbalLock) {
 		// Snap exactly to ±90°
-		t5 = (s5 > 0 ? PI/2 : -PI/2);
+		t5 = (s5 > 0 ? PI / 2 : -PI / 2);
 
 		// One DOF lost → choose a convention
 		t4 = 0.0f;
@@ -262,11 +257,9 @@ Eigen::Vector3d wristIk(float x, float y, float z, float roll, float pitch, floa
 
 	MatrixXd calcRot = rot4 * rot5 * rot6;
 
-	
+
 	cout << "Calculated wrist rotation: (" << calcRot << ")\n";
-	cout << "\nWrist angles: (" << t4 << ", " << t5 << ", " << t6 << ")\n";	
+	cout << "\nWrist angles: (" << t4 << ", " << t5 << ", " << t6 << ")\n";
 
 	return Eigen::Vector3d(t4, t5, t6);
 }
-
-

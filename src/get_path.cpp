@@ -1,67 +1,47 @@
+#include <opencv2/opencv.hpp>
 #include <iostream>
-#include <cmath>
-#include <random>
-#include <chrono>
-#include <thread>
-
-#include <Eigen/Dense>
-
-#include <opencv2/opencv.hpp> 
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgcodecs.hpp>
-
-#include "render.h"
-#include "calculations.h"
-#include "arm_attributes.h"
-#include "get_path.h"
-
-using namespace cv;
-
-Mat src, src_gray;
-Mat dst, detected_edges;
-int lowThreshold = 0, highThreshold = 100;
-const int ratio = 3;
-const int kernel_size = 3;
-const char* window_name = "test edges";
-
-static void CannyThreshold(int, void*) {
-	//blur with filter of kernel size 3
-	blur(src_gray, detected_edges, Size(3, 3));
-	//apply canny
-	Canny(detected_edges, detected_edges, lowThreshold, highThreshold * ratio, kernel_size);
-
-	//create a black image (backdrop)
-	dst = Scalar::all(0);
-
-	//copyy the edges onto the black image
-	src.copyTo(dst, detected_edges);
-
-	imshow(window_name, dst);
-}
 
 void find_target() {
-	// Check if the image was loaded successfully
-	Mat img = imread("C:\\Users\\annie\\Pictures\\Screenshots\\test2.png");
-	
-	if (img.empty()) {
-		std::cerr << "Error: Could not open or find the image.\n";
-		waitKey(0);
-		return;
-	}
+    // Paths to your images
+    std::string left_path = "C:\\Users\\annie\\Documents\\CppProjects\\learnOpenCV\\data\\imgL.png";
+    std::string right_path = "C:\\Users\\annie\\Documents\\CppProjects\\learnOpenCV\\data\\imgR.png";
 
-	resize(img, src, Size(400,400));
+    // Load images
+    cv::Mat imgL = cv::imread(left_path);
+    cv::Mat imgR = cv::imread(right_path);
 
-	//create matrix of same type and size (the black image)
-	dst.create(src.size(), src.type());
+    if (imgL.empty() || imgR.empty()) {
+        std::cerr << "Cannot load images!" << std::endl;
+        return;
+    }
 
-	//convert to grayscale
-	cvtColor(src, src_gray, COLOR_BGR2GRAY);
+    // Resize images to half their size
+    cv::Mat imgL_resized, imgR_resized;
+    cv::resize(imgL, imgL_resized, cv::Size(480, 600), 0, 0, cv::INTER_LINEAR);
+    cv::resize(imgR, imgR_resized, cv::Size(480, 600), 0, 0, cv::INTER_LINEAR);
 
-	namedWindow(window_name, WINDOW_AUTOSIZE);
+    // Convert to grayscale
+    cv::Mat grayL, grayR;
+    cv::cvtColor(imgL_resized, grayL, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(imgR_resized, grayR, cv::COLOR_BGR2GRAY);
 
-	//add trackbar for user to enter threshold
-	createTrackbar("Min Threshold:", window_name, &lowThreshold, highThreshold, CannyThreshold);
-	CannyThreshold(0, 0);
+    // Create StereoBM object
+    int numDisparities = 16; // must be multiple of 16
+    int blockSize = 15;      // odd number
+    cv::Ptr<cv::StereoBM> stereo = cv::StereoBM::create(numDisparities, blockSize);
 
-	waitKey(0);
+    // Compute disparity
+    cv::Mat disp16S, disp32F;
+    stereo->compute(grayL, grayR, disp16S);
+    disp16S.convertTo(disp32F, CV_32F, 1.0 / 16.0);
+
+    // Normalize for display
+    cv::Mat dispNormalized;
+    cv::normalize(disp32F, dispNormalized, 0, 255, cv::NORM_MINMAX, CV_8U);
+
+    // Show images
+    cv::imshow("Left", grayL);
+    cv::imshow("Right", grayR);
+    cv::imshow("Disparity", dispNormalized);
+    cv::waitKey(0);
 }
